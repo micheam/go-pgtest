@@ -3,6 +3,7 @@ package pgtest_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
+	"github.com/stretchr/testify/require"
 
 	pgtest "github.com/micheam/go-pgtest"
 )
@@ -17,23 +19,20 @@ import (
 func TestMain(m *testing.M) {
 	_ = slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	// setup
-	cleanup, err := pgtest.Start(context.Background())
+	ctx := context.Background()
+	cleanup, err := pgtest.Start(ctx)
 	if err != nil {
-		log.Fatalf("could not start pgtest server: %s", err)
+		log.Fatal(err)
 	}
 
-	code := m.Run()
+	m.Run()
 
 	if err := cleanup(); err != nil {
-		log.Fatalf("could not stop pgtest server: %s", err)
+		fmt.Fprintf(os.Stderr, "failed to cleanup pg-test: %v\n", err)
 	}
-
-	os.Exit(code)
 }
 
 func Test_RunPG(t *testing.T) {
-
 	// Setup
 	migrationfn := func(db *sql.DB) error {
 		_, err := db.Exec("CREATE TABLE IF NOT EXISTS test (id uuid not null primary key)")
@@ -49,16 +48,12 @@ func Test_RunPG(t *testing.T) {
 	// Insert
 	id := uuid.NewString()
 	_, err := db.Exec("INSERT INTO test (id) VALUES ($1);", id)
-	if err != nil {
-		t.Fatalf("could not insert: %s", err)
-	}
+	require.NoError(t, err)
 
 	// Select
 	var got string
 	err = db.QueryRow("SELECT id FROM test").Scan(&got)
-	if err != nil {
-		t.Fatalf("could not select: %s", err)
-	}
+	require.NoError(t, err)
 
 	// Verify
 	if got != id {

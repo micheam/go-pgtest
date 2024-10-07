@@ -1,6 +1,6 @@
 # go-pgtest
 
-## Description
+[![Go](https://github.com/micheam/go-pgtest/actions/workflows/go.yml/badge.svg)](https://github.com/micheam/go-pgtest/actions/workflows/go.yml)
 
 `go-pgtest` is a Go module specifically designed to assist in testing applications that depend on PostgreSQL databases. It provides utilities for setting up temporary test databases that are automatically initiated when `go test` is executed and disposed of once the tests are complete. This functionality ensures a clean and isolated testing environment, making it particularly beneficial for developers aiming to streamline and enhance their database testing workflows.
 
@@ -11,12 +11,15 @@ several functions to help manage and assert database states during tests.
 
 ### Functions
 
-- `AssertRecordCount(t *testing.T, tx *sqlx.Tx, expectedCount int, table string, filterQuery string, ...) bool`: Asserts that a table contains a specific number of records matching a filter.
-- `AssertRecordExists(t *testing.T, tx *sqlx.Tx, table string, filterQuery string, params ...any) bool`: Asserts that a record exists in a table matching a filter.
-- `AssertRecordNotExists(t *testing.T, tx *sqlx.Tx, table string, filterQuery string, params ...any) bool`: Asserts that no record exists in a table matching a filter.
-- `DebugEnable()`: Enables debugging output.
-- `Open(t *testing.T, migrationFn func(db *sql.DB) error) *sql.DB`: Opens a new database connection and applies migrations.
 - `Start(ctx context.Context) (func() error, error)`: Starts a new database session.
+    This function may be called at the beginning of a test to create a new database session.
+    We intent to call this from `TestMain` function.
+
+- `Open(t *testing.T, migrationFn func(db *sql.DB) error) *sql.DB`: Opens a new database connection and applies migrations.
+    This function may be called within a test to open a new database connection and apply migrations.
+    The `migrationFn` parameter is a function that accepts a `*sql.DB` and returns an error.
+
+    *Note*: This may block your process until the database is ready.
 
 ## Examples
 
@@ -26,22 +29,43 @@ Here's a basic example of how to use `go-pgtest` in a test:
 package mypackage_test
 
 import (
-    "testing"
-    "github.com/micheam/go-pgtest"
+	pgtest "github.com/micheam/go-pgtest"
     "github.com/jmoiron/sqlx"
+    "testing"
 )
 
+func TestMain(m *testing.M) {
+	slog.SetLogLoggerLevel(slog.LevelDebug)
+
+	ctx := context.Background()
+	cleanup, err := pgtest.Start(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	m.Run()
+
+	if err := cleanup(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to cleanup pg-test: %v\n", err)
+	}
+}
+
 func TestDatabaseOperations(t *testing.T) {
-    db := go-pgtest.Open(t, func(db *sql.DB) error {
-        // Apply migrations
-        return nil
-    })
-    defer db.Close()
+	// Setup
+	migrationfn := func(db *sql.DB) error {
+        // Add your migration code here
+		_, err := db.Exec("CREATE TABLE IF NOT EXISTS test (id uuid not null primary key)")
+		return err
+	}
+	db := pgtest.Open(t, migrationfn)
+	defer db.Close()
 
     tx := db.MustBegin()
     defer tx.Rollback()
 
-    go-pgtest.AssertRecordCount(t, tx, 1, "users", "WHERE active = ?", true)
+    // Now, you can perform database operations
+	_, err := db.Exec("INSERT INTO test (id) VALUES ($1);", uuid.NewString())
+    require.NoError(t, err)
 }
 ```
 
@@ -50,7 +74,7 @@ func TestDatabaseOperations(t *testing.T) {
 This module was developed by [Michito Maeda](https://micheam.com)
 Contributions and feedback are welcome.
 
-## License
+## Acknowledgements
 
-`go-pgtest` is licensed under the MIT License.
-See the LICENSE file for details.
+`go-pgtest` relies heavily on the `github.com/ory/dockertest` library. We would like to express our gratitude to the maintainers of `dockertest` for their excellent work, which makes this module possible.
+
