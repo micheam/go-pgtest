@@ -29,9 +29,9 @@ Here's a basic example of how to use `go-pgtest` in a test:
 package mypackage_test
 
 import (
+	...
+
 	pgtest "github.com/micheam/go-pgtest"
-    "github.com/jmoiron/sqlx"
-    "testing"
 )
 
 func TestMain(m *testing.M) {
@@ -53,21 +53,23 @@ func TestMain(m *testing.M) {
 func TestDatabaseOperations(t *testing.T) {
 	// Setup
 	migrationfn := func(db *sql.DB) error {
-        // Add your migration code here
+		// Add your migration code here
 		_, err := db.Exec("CREATE TABLE IF NOT EXISTS test (id uuid not null primary key)")
 		return err
 	}
 	db := pgtest.Open(t, migrationfn)
 	defer db.Close()
 
-    tx := db.MustBegin()
-    defer tx.Rollback()
+	tx := db.MustBegin()
+	defer tx.Rollback()
 
-    // Now, you can perform database operations
+	// Now, you can perform database operations
 	_, err := db.Exec("INSERT INTO test (id) VALUES ($1);", uuid.NewString())
-    require.NoError(t, err)
+	require.NoError(t, err)
 }
 ```
+
+For more detailed examples, please refer to the [pgtest_test.go](pgtest_test.go) file.
 
 ## Author
 
