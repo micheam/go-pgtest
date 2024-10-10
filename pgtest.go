@@ -17,6 +17,46 @@ import (
 	"github.com/micheam/go-pgtest/internal/dbconfig"
 )
 
+const (
+	DefaultImageTag = "15"
+	DefaultDatabase = "test_db"
+	DefaultUser     = "test_user"
+	DefaultPassword = "secret"
+)
+
+type Option func(*Config)
+
+type Config struct {
+	imageTag   string
+	dbpassword string
+	dbuser     string
+	dbname     string
+}
+
+func WithImageTag(tag string) Option {
+	return func(c *Config) {
+		c.imageTag = tag
+	}
+}
+
+func WithDatabase(name string) Option {
+	return func(c *Config) {
+		c.dbname = name
+	}
+}
+
+func WithUser(name string) Option {
+	return func(c *Config) {
+		c.dbuser = name
+	}
+}
+
+func WithPassword(password string) Option {
+	return func(c *Config) {
+		c.dbpassword = password
+	}
+}
+
 // maxWait is the maximum time to wait for MinIO server to start.
 // Adjust this value if you see "context deadline exceeded" error.
 //
@@ -24,35 +64,28 @@ import (
 // If you want to change this value, change it before calling [Start].
 var maxWait = 10 * time.Second
 
-var db *sql.DB
-
 var (
-	once    sync.Once
-	cleanup func() error
-
+	once        sync.Once
+	cleanup     func() error
+	db          *sql.DB
 	hostAndPort string
 	databaseUrl string
-
-	dbpassword = "secret"
-	dbuser     = "test_user"
-	dbname     = "test_db"
-
-	opt = &dockertest.RunOptions{
-		Repository: "postgres",
-		Tag:        "15",
-		Env: []string{
-			"POSTGRES_PASSWORD=" + dbpassword,
-			"POSTGRES_USER=" + dbuser,
-			"POSTGRES_DB=" + dbname,
-			"listen_addresses = '*'",
-		},
-	}
 )
 
 // Start starts a postgresql server in docker.
 // It returns a cleanup function to stop the server.
-func Start(ctx context.Context) (func() error, error) {
+func Start(ctx context.Context, opts ...Option) (func() error, error) {
 	logger := slog.With("module", "pgtest")
+
+	config := &Config{
+		imageTag:   DefaultImageTag,
+		dbpassword: DefaultPassword,
+		dbuser:     DefaultUser,
+		dbname:     DefaultDatabase,
+	}
+	for _, opt := range opts {
+		opt(config)
+	}
 
 	var err error
 	once.Do(func() {
@@ -68,10 +101,20 @@ func Start(ctx context.Context) (func() error, error) {
 			return
 		}
 
-		resource, err := pool.RunWithOptions(opt, func(config *docker.HostConfig) {
+		runOpts := &dockertest.RunOptions{
+			Repository: "postgres",
+			Tag:        config.imageTag,
+			Env: []string{
+				"POSTGRES_PASSWORD=" + config.dbpassword,
+				"POSTGRES_USER=" + config.dbuser,
+				"POSTGRES_DB=" + config.dbname,
+				"listen_addresses = '*'",
+			},
+		}
+		resource, err := pool.RunWithOptions(runOpts, func(c *docker.HostConfig) {
 			// set AutoRemove to true so that stopped container goes away by itself
-			config.AutoRemove = true
-			config.RestartPolicy = docker.RestartPolicy{Name: "no"}
+			c.AutoRemove = true
+			c.RestartPolicy = docker.RestartPolicy{Name: "no"}
 		})
 
 		if err != nil {
@@ -80,7 +123,7 @@ func Start(ctx context.Context) (func() error, error) {
 
 		hostAndPort = resource.GetHostPort("5432/tcp")
 
-		databaseUrl = dbconfig.NewConfig(dbuser, dbpassword, dbname,
+		databaseUrl = dbconfig.NewConfig(config.dbuser, config.dbpassword, config.dbname,
 			dbconfig.WithHostPort(hostAndPort),
 			dbconfig.WithSSLModeEnabled(false),
 		).FormatDSN()
